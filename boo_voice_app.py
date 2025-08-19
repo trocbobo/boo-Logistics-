@@ -1,33 +1,26 @@
 import streamlit as st
+import openai
 import speech_recognition as sr
 from gtts import gTTS
-from io import BytesIO
-import pandas as pd
-import openai
+import tempfile
+import os
 
-# 🚀 Config OpenAI
+# 🔑 API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("🎤 Boo Voice Assistant - Logistics")
-st.write("Nói lệnh để Boo tạo báo cáo Doanh thu 📊")
+st.set_page_config(page_title="Boo Logistics Voice", page_icon="🎤", layout="wide")
 
-uploaded_file = st.file_uploader("📂 Upload file dữ liệu Excel (DATA)", type=["xlsx"])
+st.title("🎤 Trợ lý Boo Logistics")
+st.write("Upload file giọng nói (.wav, .mp3) để Boo tạo báo cáo 📊")
 
-# Hàm tạo báo cáo doanh thu
-def bao_cao_doanhthu(df, thang_filter="2025-06"):
-    df_t = df[df["THÁNG"].astype(str).str.contains(thang_filter, na=False)].copy()
-    report = df_t.groupby("TÊN KHÁCH HÀNG").agg({
-        "Tổng VND": "sum"
-    }).reset_index().rename(columns={"Tổng VND": "DOANH THU"})
-    return report
+# 🎤 Upload file audio
+uploaded_audio = st.file_uploader("👉 Chọn file giọng nói (.wav, .mp3)", type=["wav", "mp3"])
 
-# 1️⃣ Thu âm giọng nói
-if st.button("🎙️ Thu âm"):
+query = ""
+if uploaded_audio:
     recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.write("👉 Đang nghe...")
-        audio = recognizer.listen(source)
-
+    with sr.AudioFile(uploaded_audio) as source:
+        audio = recognizer.record(source)
     try:
         query = recognizer.recognize_google(audio, language="vi-VN")
         st.success(f"Anh nói: {query}")
@@ -35,26 +28,22 @@ if st.button("🎙️ Thu âm"):
         st.error("❌ Không nhận diện được giọng nói.")
         query = ""
 
-    if query:
-        # 2️⃣ GPT xử lý câu hỏi (hiểu ngữ cảnh)
-        response = openai.ChatCompletion.create(
+# 📝 Xử lý yêu cầu
+if query:
+    with st.spinner("⏳ Boo đang xử lý..."):
+        response = openai.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": query}]
+            messages=[
+                {"role": "system", "content": "Bạn là Trợ lý Boo, chuyên báo cáo logistics."},
+                {"role": "user", "content": query}
+            ]
         )
-        answer = response["choices"][0]["message"]["content"]
-        st.write(f"🟢 Boo: {answer}")
+        answer = response.choices[0].message.content
+        st.write("### 📊 Kết quả báo cáo")
+        st.write(answer)
 
-        # 3️⃣ Đọc câu trả lời bằng giọng nói
+        # 🎧 Xuất ra file mp3 để nghe
         tts = gTTS(answer, lang="vi")
-        audio_bytes = BytesIO()
-        tts.write_to_fp(audio_bytes)
-        st.audio(audio_bytes, format="audio/mp3")
-
-        # 4️⃣ Nếu có file dữ liệu thì xử lý báo cáo doanh thu
-        if uploaded_file and "doanh thu" in query.lower():
-            df = pd.read_excel(uploaded_file, sheet_name="DATA", header=1)
-            report = bao_cao_doanhthu(df, thang_filter="2025-06")
-            out_file = "Bao_cao_DoanhThu_T6.xlsx"
-            report.to_excel(out_file, index=False)
-            st.success("✅ Đã tạo báo cáo doanh thu T6")
-            st.download_button("📥 Tải báo cáo Excel", data=open(out_file, "rb"), file_name=out_file)
+        tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        tts.save(tmpfile.name)
+        st.audio(tmpfile.name, format="audio/mp3")
