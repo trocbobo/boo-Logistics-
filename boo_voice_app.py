@@ -1,49 +1,50 @@
 import streamlit as st
-import openai
-import speech_recognition as sr
-from gtts import gTTS
-import tempfile
+import requests
+import mimetypes
 import os
 
-# 🔑 API key
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+st.title("🎤 Boo Voice Logistics App")
 
-st.set_page_config(page_title="Boo Logistics Voice", page_icon="🎤", layout="wide")
+DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
 
-st.title("🎤 Trợ lý Boo Logistics")
-st.write("Upload file giọng nói (.wav, .mp3) để Boo tạo báo cáo 📊")
+url = "https://api.deepgram.com/v1/listen"
 
-# 🎤 Upload file audio
-uploaded_audio = st.file_uploader("👉 Chọn file giọng nói (.wav, .mp3)", type=["wav", "mp3"])
+def transcribe_audio(file_path):
+    # Đoán loại file audio (wav, mp3, m4a)
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if not mime_type:
+        mime_type = "audio/mpeg"  # fallback cho mp3
 
-query = ""
-if uploaded_audio:
-    recognizer = sr.Recognizer()
-    with sr.AudioFile(uploaded_audio) as source:
-        audio = recognizer.record(source)
-    try:
-        query = recognizer.recognize_google(audio, language="vi-VN")
-        st.success(f"Anh nói: {query}")
-    except:
-        st.error("❌ Không nhận diện được giọng nói.")
-        query = ""
+    headers = {
+        "Authorization": f"Token {DEEPGRAM_API_KEY}",
+        "Content-Type": mime_type
+    }
 
-# 📝 Xử lý yêu cầu
-if query:
-    with st.spinner("⏳ Boo đang xử lý..."):
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Bạn là Trợ lý Boo, chuyên báo cáo logistics."},
-                {"role": "user", "content": query}
-            ]
-        )
-        answer = response.choices[0].message.content
-        st.write("### 📊 Kết quả báo cáo")
-        st.write(answer)
+    params = {
+        "model": "nova-2",
+        "language": "vi"
+    }
 
-        # 🎧 Xuất ra file mp3 để nghe
-        tts = gTTS(answer, lang="vi")
-        tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        tts.save(tmpfile.name)
-        st.audio(tmpfile.name, format="audio/mp3")
+    with open(file_path, "rb") as f:
+        response = requests.post(url, headers=headers, params=params, data=f)
+
+    return response.json()
+
+uploaded_file = st.file_uploader("📂 Upload file ghi âm (.mp3, .wav, .m4a)", type=["mp3", "wav", "m4a"])
+
+if uploaded_file is not None:
+    # Lưu file tạm
+    file_path = os.path.join("/tmp", uploaded_file.name)
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    st.audio(file_path)
+
+    st.write("⏳ Đang nhận diện giọng nói...")
+    result = transcribe_audio(file_path)
+
+    if "results" in result:
+        transcript = result["results"]["channels"][0]["alternatives"][0]["transcript"]
+        st.success(f"📝 Nội dung: {transcript}")
+    else:
+        st.error("⚠️ Lỗi khi nhận diện: " + str(result))
